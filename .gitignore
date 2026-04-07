@@ -1,0 +1,16 @@
+# Sensitive data
+index.json
+blocklist.txt
+processed.txt
+queue.txt
+
+# Runtime data
+workspace/
+logs/
+scans/
+runs/
+__pycache__/
+*.pyc
+
+# Credentials (store separately)
+~/.secrets/
