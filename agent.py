@@ -22,25 +22,30 @@ def log(msg):
 
 
 def mirror_to_thread_intelligence():
-    """Mirror scan results to Thread Intelligence project."""
-    import shutil
+    """Mirror scan results to Thread Intelligence project and deploy to Netlify."""
+    import shutil, subprocess
 
     scans_src = BUGHUNT / 'scans'
-    scans_dst = THREAD_INTEL_PATH / 'scans'
+    scans_dst = THREAD_INTEL_PATH / 'data' / 'scans'
     index_src = BUGHUNT / 'index.json'
     index_dst = THREAD_INTEL_PATH / 'data' / 'index.json'
 
     if not scans_src.exists():
+        log("[mirror] No scans directory found")
         return
 
     # Create destination dirs
     scans_dst.mkdir(parents=True, exist_ok=True)
     (THREAD_INTEL_PATH / 'data').mkdir(parents=True, exist_ok=True)
 
-    # Mirror all scan directories
+    # Mirror all scan directories preserving path: scans/YYYY/MM/DD/{owner}__{repo}/
     count = 0
-    for scan_dir in scans_src.rglob('*__*/'):  # find all {owner}__{repo} dirs
-        dst = scans_dst / scan_dir.name
+    for scan_dir in scans_src.glob('*/*/*/*/'):
+        if not scan_dir.is_dir():
+            continue
+        rel_path = scan_dir.relative_to(scans_src)
+        dst = scans_dst / rel_path
+        dst.parent.mkdir(parents=True, exist_ok=True)
         if dst.exists():
             shutil.rmtree(dst)
         shutil.copytree(scan_dir, dst)
@@ -50,7 +55,29 @@ def mirror_to_thread_intelligence():
     if index_src.exists():
         shutil.copy2(index_src, index_dst)
 
-    log(f"[mirror] Mirrored {count} scan dirs to Thread Intelligence")
+    log(f"[mirror] Mirrored {count} scan dirs")
+
+    # Deploy to Netlify
+    try:
+        result = subprocess.run(
+            ['netlify', 'deploy', '--dir=.', '--prod'],
+            cwd=str(THREAD_INTEL_PATH),
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        if result.returncode == 0:
+            for line in result.stdout.split('\n'):
+                if 'Production URL' in line or 'deploy is live' in line.lower():
+                    log(f"[mirror] {line.strip()}")
+                    break
+            log("[mirror] Netlify deploy complete")
+        else:
+            log(f"[mirror] Netlify failed: {result.stderr[:200]}")
+    except FileNotFoundError:
+        log("[mirror] netlify CLI not found — skipping deploy")
+    except Exception as e:
+        log(f"[mirror] Netlify error: {e}")
 
 
 def main():
