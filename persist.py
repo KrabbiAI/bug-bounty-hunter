@@ -58,6 +58,7 @@ def persist_scan(scan_result: dict, repo_meta: dict, findings: list, pr_info: di
             'raw_findings_count': raw_findings_count,
             'has_raw_findings': has_findings,
             'findings_after_triage': len([f for f in findings if not f.get('false_positive')]) if findings else 0,
+            'language': repo_meta.get('language', 'unknown'),
         }
     }, indent=2))
 
@@ -115,6 +116,7 @@ def persist_scan(scan_result: dict, repo_meta: dict, findings: list, pr_info: di
 
 
 def rebuild_index():
+    """Rebuild index.json from all meta.json and summary.json files."""
     index = {
         'schema_version': '1.0',
         'generated_at': datetime.now(timezone.utc).isoformat(),
@@ -123,62 +125,99 @@ def rebuild_index():
         'total_findings': 0,
         'total_true_positives': 0,
         'total_prs_submitted': 0,
+        'total_raw_findings': 0,
         'cumulative_by_severity': {'critical': 0, 'high': 0, 'medium': 0, 'low': 0},
         'cumulative_by_type': {},
-        'runs': [],
+        'languages': {},
         'recent_repos': [],
     }
 
-    summaries = sorted(
-        BUGHUNT.glob('scans/*/*/*/*/summary.json'),
+    # Find all scan directories (those with meta.json)
+    scan_dirs = sorted(
+        BUGHUNT.glob('scans/*/*/*/*/'),
         key=lambda p: p.stat().st_mtime, reverse=True
     )
 
-    for s_path in summaries:
+    for scan_dir in scan_dirs:
+        meta_file = scan_dir / 'meta.json'
+        summary_file = scan_dir / 'summary.json'
+
+        if not meta_file.exists():
+            continue
+
         try:
-            s = json.loads(s_path.read_text())
+            meta = json.loads(meta_file.read_text())
         except Exception:
             continue
+
+        repo = meta.get('repo', {})
+        findings_sum = meta.get('findings_summary', {})
+        full_name = repo.get('full_name', scan_dir.name.replace('__', '/'))
+        scan_entry = {
+            'repo': full_name,
+            'scanned_at': meta.get('scanned_at', ''),
+            'scan_dir': str(scan_dir.relative_to(BUGHUNT)),
+            'language': findings_sum.get('language', repo.get('language', 'unknown')),
+            'stars': repo.get('stars', 0),
+            'forks': repo.get('forks', 0),
+            'raw_findings': findings_sum.get('raw_findings_count', 0),
+            'has_raw_findings': findings_sum.get('has_raw_findings', False),
+            'true_positives': 0,
+            'critical': 0,
+            'high': 0,
+            'pr_url': None,
+        }
+
+        # Enhance with summary.json if available
+        if summary_file.exists():
+            try:
+                summary = json.loads(summary_file.read_text())
+                findings = summary.get('findings', {})
+                scan_entry['true_positives'] = findings.get('true_positives', 0)
+                scan_entry['critical'] = findings.get('by_severity', {}).get('critical', 0)
+                scan_entry['high'] = findings.get('by_severity', {}).get('high', 0)
+                scan_entry['pr_url'] = findings.get('pr_url')
+                index['total_true_positives'] += findings.get('true_positives', 0)
+                if findings.get('pr_submitted'):
+                    index['total_prs_submitted'] += 1
+                for sev, cnt in findings.get('by_severity', {}).items():
+                    index['cumulative_by_severity'][sev] = \
+                        index['cumulative_by_severity'].get(sev, 0) + cnt
+                for t, cnt in findings.get('by_type', {}).items():
+                    index['cumulative_by_type'][t] = \
+                        index['cumulative_by_type'].get(t, 0) + cnt
+            except Exception:
+                pass
+
         index['total_repos_analyzed'] += 1
-        index['total_findings'] += s['findings']['true_positives']
-        index['total_true_positives'] += s['findings']['true_positives']
-        if s['findings']['pr_submitted']:
-            index['total_prs_submitted'] += 1
-        for sev, cnt in s['findings']['by_severity'].items():
-            index['cumulative_by_severity'][sev] = \
-                index['cumulative_by_severity'].get(sev, 0) + cnt
-        for t, cnt in s['findings'].get('by_type', {}).items():
-            index['cumulative_by_type'][t] = \
-                index['cumulative_by_type'].get(t, 0) + cnt
-        if len(index['recent_repos']) < 50:
-            index['recent_repos'].append({
-                'repo': s['repo_full_name'],
-                'scanned_at': s['scanned_at'],
-                'scan_dir': str(s_path.parent.relative_to(BUGHUNT)),
-                'critical': s['findings']['by_severity'].get('critical', 0),
-                'high': s['findings']['by_severity'].get('high', 0),
-                'pr_url': s['findings'].get('pr_url'),
-            })
+        index['total_raw_findings'] += findings_sum.get('raw_findings_count', 0)
+
+        # Track languages
+        lang = findings_sum.get('language', repo.get('language', 'unknown'))
+        index['languages'][lang] = index['languages'].get(lang, 0) + 1
+
+        if len(index['recent_repos']) < 100:
+            index['recent_repos'].append(scan_entry)
 
     (BUGHUNT / 'index.json').write_text(json.dumps(index, indent=2))
-    print(f"[index] Rebuilt: {index['total_repos_analyzed']} repos indexed")
+    print(f"[index] Rebuilt: {index['total_repos_analyzed']} repos, {index['total_raw_findings']} raw findings")
 
 
 def prune_old_scans(keep=100):
     """Delete old scan directories, keeping only the most recent `keep` repos."""
-    summaries = sorted(
-        BUGHUNT.glob('scans/*/*/*/*/summary.json'),
+    # Find all scan directories (those with meta.json)
+    scan_dirs = sorted(
+        BUGHUNT.glob('scans/*/*/*/*/'),
         key=lambda p: p.stat().st_mtime,
         reverse=True
     )
-    if len(summaries) <= keep:
-        print(f"[prune] {len(summaries)} repos — nothing to prune")
+    if len(scan_dirs) <= keep:
+        print(f"[prune] {len(scan_dirs)} repos — nothing to prune")
         return
 
-    to_delete = summaries[keep:]
+    to_delete = scan_dirs[keep:]
     deleted = 0
-    for s_path in to_delete:
-        scan_dir = s_path.parent
+    for scan_dir in to_delete:
         try:
             shutil.rmtree(scan_dir)
             deleted += 1

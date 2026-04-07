@@ -150,6 +150,78 @@ def main():
     # Phase 8 — Mirror scans to Thread Intelligence project
     mirror_to_thread_intelligence()
 
+    # Phase 9 — Send Telegram summary
+    send_telegram_summary(processed, run_repos)
+
+
+def send_telegram_summary(processed: int, run_repos: list):
+    """Send a summary message to Telegram after scan completion."""
+    import urllib.request, urllib.parse
+
+    index_file = BUGHUNT / 'index.json'
+    if index_file.exists():
+        index = json.loads(index_file.read_text())
+        total_repos = index.get('total_repos_analyzed', 0)
+        total_raw = index.get('total_raw_findings', 0)
+        total_prs = index.get('total_prs_submitted', 0)
+        languages = index.get('languages', {})
+        sev = index.get('cumulative_by_severity', {})
+    else:
+        total_repos = processed
+        total_raw = 0
+        total_prs = 0
+        languages = {}
+        sev = {}
+
+    # Build top languages string
+    top_langs = sorted(languages.items(), key=lambda x: x[1], reverse=True)[:5]
+    langs_str = ', '.join([f"{k}:{v}" for k, v in top_langs]) or 'none'
+
+    # Build recent findings (read raw_findings from meta.json)
+    recent_with_findings = []
+    for r in run_repos:
+        scan_dir = BUGHUNT / r['scan_dir']
+        meta_file = scan_dir / 'meta.json'
+        if meta_file.exists():
+            try:
+                meta = json.loads(meta_file.read_text())
+                raw = meta.get('findings_summary', {}).get('raw_findings_count', 0)
+                recent_with_findings.append({'repo': r['repo'], 'raw': raw})
+            except:
+                pass
+    findings_str = '\n'.join([f"  • {r['repo']}: {r['raw']} raw" for r in recent_with_findings if r['raw'] > 0]) or '  None'
+
+    msg = f"""🦀 *Bug Bounty Hunter — Scan Complete*
+
+📊 *Session:* {processed} repos scanned
+📈 *Total:* {total_repos} repos | {total_raw} raw findings | {total_prs} PRs
+
+🔍 *This run:*
+{findings_str}
+
+📂 *Languages:* {langs_str}
+
+🔴 Critical: {sev.get('critical', 0)} | 🟠 High: {sev.get('high', 0)} | 🟡 Medium: {sev.get('medium', 0)}
+
+Dashboard: https://serene-daifuku-1d5503.netlify.app"""
+
+    token = "8798400513:AAHVGh4T2dtsEXZML6zmtXLNLVPM4lpAcZE"
+    chat_id = "631196199"
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+
+    data = urllib.parse.urlencode({
+        'chat_id': chat_id,
+        'text': msg,
+        'parse_mode': 'Markdown',
+    }).encode()
+
+    try:
+        req = urllib.request.Request(url, data=data)
+        urllib.request.urlopen(req, timeout=10)
+        log("[telegram] Summary sent")
+    except Exception as e:
+        log(f"[telegram] Failed: {e}")
+
 
 if __name__ == '__main__':
     main()
