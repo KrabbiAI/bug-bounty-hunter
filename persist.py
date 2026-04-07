@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """persist.py — Write all scan artifacts and rebuild master index."""
-import json
+import json, shutil
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -162,3 +162,27 @@ def rebuild_index():
 
     (BUGHUNT / 'index.json').write_text(json.dumps(index, indent=2))
     print(f"[index] Rebuilt: {index['total_repos_analyzed']} repos indexed")
+
+
+def prune_old_scans(keep=100):
+    """Delete old scan directories, keeping only the most recent `keep` repos."""
+    summaries = sorted(
+        BUGHUNT.glob('scans/*/*/*/*/summary.json'),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True
+    )
+    if len(summaries) <= keep:
+        print(f"[prune] {len(summaries)} repos — nothing to prune")
+        return
+
+    to_delete = summaries[keep:]
+    deleted = 0
+    for s_path in to_delete:
+        scan_dir = s_path.parent
+        try:
+            shutil.rmtree(scan_dir)
+            deleted += 1
+        except Exception as e:
+            print(f"[prune] Failed to delete {scan_dir}: {e}")
+
+    print(f"[prune] Deleted {deleted} old repos, kept {keep} most recent")

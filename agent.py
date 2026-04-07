@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, str(Path(__file__).parent))
 from check_size import check_repo
 from analyze import analyze_repo
-from persist import persist_scan, rebuild_index
+from persist import persist_scan, rebuild_index, prune_old_scans
 
 BUGHUNT   = Path.home() / 'bughunt'
 TOKEN     = os.environ.get('GITHUB_TOKEN', '')
@@ -71,6 +71,9 @@ def main():
 
     # Phase 5 — Rebuild index
     rebuild_index()
+
+    # Phase 6 — Prune old scans (keep last 100)
+    prune_old_scans(keep=100)
 
     # Phase 6 — Write run record
     run_record = {
