@@ -14,10 +14,43 @@ TOKEN     = os.environ.get('GITHUB_TOKEN', '')
 RUN_ID    = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')
 MAX_REPOS = 3
 SLEEP_SEC = 2
+THREAD_INTEL_PATH = Path.home() / 'projects' / 'krabbi-thread-intelligence'
 
 
 def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def mirror_to_thread_intelligence():
+    """Mirror scan results to Thread Intelligence project."""
+    import shutil
+
+    scans_src = BUGHUNT / 'scans'
+    scans_dst = THREAD_INTEL_PATH / 'scans'
+    index_src = BUGHUNT / 'index.json'
+    index_dst = THREAD_INTEL_PATH / 'data' / 'index.json'
+
+    if not scans_src.exists():
+        return
+
+    # Create destination dirs
+    scans_dst.mkdir(parents=True, exist_ok=True)
+    (THREAD_INTEL_PATH / 'data').mkdir(parents=True, exist_ok=True)
+
+    # Mirror all scan directories
+    count = 0
+    for scan_dir in scans_src.rglob('*__*/'):  # find all {owner}__{repo} dirs
+        dst = scans_dst / scan_dir.name
+        if dst.exists():
+            shutil.rmtree(dst)
+        shutil.copytree(scan_dir, dst)
+        count += 1
+
+    # Mirror index
+    if index_src.exists():
+        shutil.copy2(index_src, index_dst)
+
+    log(f"[mirror] Mirrored {count} scan dirs to Thread Intelligence")
 
 
 def main():
@@ -86,6 +119,9 @@ def main():
     }
     (BUGHUNT / 'runs' / f'run_{RUN_ID}.json').write_text(json.dumps(run_record, indent=2))
     log(f"=== Run complete. Processed: {processed} repos ===")
+
+    # Phase 8 — Mirror scans to Thread Intelligence project
+    mirror_to_thread_intelligence()
 
 
 if __name__ == '__main__':
