@@ -27,17 +27,25 @@ Autonomous security scanner that discovers public GitHub repositories, finds vul
 ## Setup
 
 ```bash
+# Requires: Python 3.8+, GitHub account
+
 # 1. Clone this repo
 git clone https://github.com/KrabbiAI/bug-bounty-hunter ~/bughunt
 cd ~/bughunt
 
 # 2. Install tools (no root required)
 pipx install semgrep trufflehog bandit pip-audit detect-secrets
+pipx ensurepath  # Adds ~/.local/bin to PATH
 
 # 3. Download binaries
-curl -sL "https://github.com/cli/cli/releases/latest/... | tar xz -C ~/bin gh
-curl -sL "https://github.com/gitleaks/gitleaks/releases/latest/... | tar xz -C ~/bin gitleaks
-curl -sL "https://github.com/jqlang/jq/releases/latest/... -o ~/bin/jq
+# gh CLI
+curl -sL "https://github.com/cli/cli/releases/download/v2.63.0/gh_2.63.0_linux_amd64.tar.gz" | tar xz -C /tmp && mv /tmp/gh_2.63.0_linux_amd64/bin/gh ~/bin/gh && chmod +x ~/bin/gh
+
+# gitleaks
+curl -sL "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks-v8.30.1-linux-amd64.tar.gz" | tar xz -C ~/bin
+
+# jq
+curl -sL "https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux64" -o ~/bin/jq && chmod +x ~/bin/jq
 
 # 4. GitHub token
 mkdir -p ~/.secrets
@@ -97,6 +105,23 @@ python3 agent.py
 - Secrets reported masked, never exfiltrated
 - PRs clearly labeled as automated
 - No root/sudo required
+
+## Verify Installation
+
+```bash
+# After setup, verify all tools:
+semgrep --version
+trufflehog version
+gitleaks version
+bandit --version
+detect-secrets --version
+gh auth status
+
+# Test discovery
+export PATH="$HOME/bin:$HOME/.local/bin:$PATH"
+export GITHUB_TOKEN="$(cat ~/.secrets/github_token)"
+cd ~/bughunt && python3 agent.py --dry_run
+```
 
 ## License
 
