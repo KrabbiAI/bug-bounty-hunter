@@ -218,8 +218,11 @@ def rebuild_index():
     print(f"[index] Rebuilt: {index['total_repos_analyzed']} repos, {index['total_raw_findings']} raw findings")
 
 
-def prune_old_scans(keep=100):
-    """Delete old scan directories, keeping only the most recent `keep` repos."""
+def prune_old_scans(keep=1000):
+    """Delete old scan directories, keeping only the most recent `keep` repos.
+    
+    Scans with PRs (pr.json) are NEVER deleted — they are preserved forever.
+    """
     # Find all scan directories (those with meta.json)
     scan_dirs = sorted(
         BUGHUNT.glob('scans/*/*/*/*/'),
@@ -230,13 +233,19 @@ def prune_old_scans(keep=100):
         print(f"[prune] {len(scan_dirs)} repos — nothing to prune")
         return
 
-    to_delete = scan_dirs[keep:]
     deleted = 0
+    skipped_pr = 0
+    to_delete = scan_dirs[keep:]
     for scan_dir in to_delete:
+        # Never delete if PR was created
+        pr_file = scan_dir / 'pr.json'
+        if pr_file.exists():
+            skipped_pr += 1
+            continue
         try:
             shutil.rmtree(scan_dir)
             deleted += 1
         except Exception as e:
             print(f"[prune] Failed to delete {scan_dir}: {e}")
 
-    print(f"[prune] Deleted {deleted} old repos, kept {keep} most recent")
+    print(f"[prune] Deleted {deleted} old repos, kept {keep} most recent (+ {skipped_pr} with PRs preserved)")

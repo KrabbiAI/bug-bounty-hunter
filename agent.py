@@ -157,8 +157,8 @@ def main():
     # Phase 5 — Rebuild index
     rebuild_index()
 
-    # Phase 6 — Prune old scans (keep last 100)
-    prune_old_scans(keep=100)
+    # Phase 6 — Prune old scans (keep last 1000, never delete PRs)
+    prune_old_scans(keep=1000)
 
     # Phase 7 — Write run record
     run_record = {
