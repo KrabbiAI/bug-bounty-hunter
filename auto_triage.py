@@ -189,20 +189,40 @@ Types: SECRET_HARDCODED, SECRET_IN_HISTORY, INJECTION_SQL, INJECTION_CMD, INJECT
 False positives: test/spec/mock paths, commented code, placeholders (xxx/changeme), os.environ references, node_modules.
 
 PATCH FORMAT - CRITICAL:
-patch_unified_diff must be a VALID UNIFIED DIFF.
+The unified diff MUST include CONTEXT LINES (lines before/after the change) for git apply to work.
+
+Example GOOD patch with context:
+```diff
+--- a/src/main.c
++++ b/src/main.c
+@@ -10,6 +10,8 @@
+ #include <stdio.h>
+ #include <string.h>
+ 
++// Security fix: added input validation
++if (user_input == NULL) {
+     return -1;
+ }
+```
+
+Example BAD patch (missing context, will fail):
+```diff
+--- a/src/main.c
++++ b/src/main.c
+@@ -10,6 +10,8 @@
+-    return -1;
++    if (user_input == NULL) {
++        return -1;
+```
 
 The patch MUST:
-1. Start with "--- a/<file>" and "+++ b/<file>"  
-2. Include proper hunk headers like "@@ -1,3 +1,4 @@"
-3. Use REAL newline characters in the JSON string (not literal \\n)
-4. Apply cleanly with: git apply patch.diff
-5. NO trailing whitespace on any line
-6. Match the EXACT line numbers from the actual file content provided
+1. Include 3-5 lines of context BEFORE the changed lines
+2. Include the full function/variable context  
+3. Match EXACT line numbers from the actual file content
+4. Use real newlines in the JSON string (not \\n escape sequences)
+5. Have NO trailing whitespace
 
-IMPORTANT: Use the ACTUAL FILE CONTENT shown above to generate accurate patches.
-If the file content shows line 5 starts with "FROM node:18", your patch header must reference line 5.
-
-Keep patches minimal - only change what's needed.
+CRITICAL: Without context lines, git apply will fail with "corrupt patch" or "patch does not apply".
 
 Sort by severity: CRITICAL > HIGH > MEDIUM > LOW. Return JSON array, empty if no true positives."""
 
