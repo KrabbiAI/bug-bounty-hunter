@@ -254,23 +254,21 @@ def send_telegram_summary(processed: int, run_repos: list, triage_result: dict =
     # Build PR section if triage found something
     pr_section = ""
     if triage_result and triage_result.get('pr_url'):
-        sev_emoji = {'CRITICAL': '🔴', 'HIGH': '🟠', 'MEDIUM': '🟡', 'LOW': '🟢'}.get(
-            triage_result.get('severity', ''), '⚪')
         pr_section = f"""
 
-✨ *PR Created!*
-{sev_emoji} [{triage_result.get('severity', '?')}] {triage_result.get('title', 'Security fix')}
-🔗 {triage_result.get('pr_url', '')}"""
+PR Created!
+[{triage_result.get('severity', '?')}] {triage_result.get('title', 'Security fix')}
+{triage_result.get('pr_url', '')}"""
 
-    msg = f"""🦀 *Bug Bounty Hunter — Scan Complete*
+    msg = f"""🦀 Bug Bounty Hunter — Scan Complete
 
-📊 *Session:* {processed} repos scanned
-📈 *Total:* {total_repos} repos | {total_raw} raw findings | {total_prs} PRs
+Session: {processed} repos
+Total: {total_repos} repos | {total_raw} raw findings | {total_prs} PRs
 
-🔍 *This run:*
+This run:
 {findings_str}
-📂 *Languages:* {langs_str}
-🔴 Critical: {sev.get('critical', 0)} | 🟠 High: {sev.get('high', 0)} | 🟡 Medium: {sev.get('medium', 0)}{pr_section}
+Languages: {langs_str}
+Critical: {sev.get('critical', 0)} | High: {sev.get('high', 0)} | Medium: {sev.get('medium', 0)}{pr_section}
 
 Dashboard: https://serene-daifuku-1d5503.netlify.app"""
 
@@ -305,13 +303,9 @@ def send_repo_scanned(num: int, total: int, meta: dict, result: dict):
     next_msg = ""
     if num < total:
         next_num = num + 1
-        next_msg = f"\n🔄 Starting next scan ({next_num}/{total})..."
+        next_msg = f"\nNext: {next_num}/{total}..."
 
-    msg = f"""📦 *Repo {num} von {total} wurde gescannt*
-
-🔗 {repo_name}
-📂 {lang} | {size_mb:.1f} MB | ⭐ {stars}
-🔍 {raw_count} raw findings{next_msg}"""
+    msg = f"Repo {num}/{total}: {repo_name} ({lang}, {size_mb:.1f}MB, {stars} stars, {raw_count} findings){next_msg}"
 
     token = "8798400513:AAHVGh4T2dtsEXZML6zmtXLNLVPM4lpAcZE"
     chat_id = "631196199"
@@ -320,7 +314,6 @@ def send_repo_scanned(num: int, total: int, meta: dict, result: dict):
     data = urllib.parse.urlencode({
         'chat_id': chat_id,
         'text': msg,
-        'parse_mode': 'Markdown',
     }).encode()
 
     try:
