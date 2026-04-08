@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""agent.py — Bug Bounty Hunter scan-only orchestrator (for cron)."""
+"""agent.py — Bug Bounty Hunter scan orchestrator for cron."""
 import json, os, sys, time, subprocess
 from pathlib import Path
 from datetime import datetime, timezone
@@ -15,6 +15,7 @@ RUN_ID    = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')
 MAX_REPOS = 10
 SLEEP_SEC = 2
 THREAD_INTEL_PATH = Path.home() / 'projects' / 'krabbi-thread-intelligence'
+DO_AUTO_TRIAGE = True  # Set False to skip auto-triage
 
 
 def log(msg):
@@ -135,7 +136,7 @@ def main():
     # Phase 6 — Prune old scans (keep last 100)
     prune_old_scans(keep=100)
 
-    # Phase 6 — Write run record
+    # Phase 7 — Write run record
     run_record = {
         'run_id': RUN_ID,
         'started_at': f"{RUN_ID[:8]}T03:00:00Z",
@@ -147,10 +148,20 @@ def main():
     (BUGHUNT / 'runs' / f'run_{RUN_ID}.json').write_text(json.dumps(run_record, indent=2))
     log(f"=== Run complete. Processed: {processed} repos ===")
 
-    # Phase 8 — Mirror scans to Thread Intelligence project
+    # Phase 8 — Auto Triage + PR (if enabled)
+    if DO_AUTO_TRIAGE:
+        log("[agent] Running auto triage...")
+        try:
+            import importlib, auto_triage
+            importlib.reload(auto_triage)
+            auto_triage.main()
+        except Exception as e:
+            log(f"[agent] Triage failed: {e}")
+
+    # Phase 9 — Mirror to Thread Intelligence + Deploy
     mirror_to_thread_intelligence()
 
-    # Phase 9 — Send Telegram summary
+    # Phase 10 — Send Telegram summary
     send_telegram_summary(processed, run_repos)
 
 
