@@ -137,13 +137,19 @@ patch_unified_diff must be a VALID UNIFIED DIFF like:
 +USER node
  RUN npm ci
 
-The patch must:
-1. Start with "--- a/<file>" and "+++ b/<file>"
+The patch MUST:
+1. Start with "--- a/<file>" and "+++ b/<file>"  
 2. Include proper hunk headers like "@@ -1,3 +1,4 @@"
 3. Use REAL newline characters in the JSON string (not literal \\n)
 4. Apply cleanly with: git apply patch.diff
+5. NO trailing whitespace on any line - every line must end clean
+6. NO empty lines with spaces/tabs
 
-DO NOT use line numbers in the diff header that don't exist in the file.
+Common failure reasons:
+- Trailing whitespace on lines (git apply rejects this)
+- Mismatched line counts in hunk headers  
+- Using \\n instead of real newlines in JSON
+
 Keep patches minimal - only change what's needed to fix the issue.
 
 Sort by severity: CRITICAL > HIGH > MEDIUM > LOW. Return JSON array, empty if no true positives."""
