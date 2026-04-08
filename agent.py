@@ -12,7 +12,7 @@ from persist import persist_scan, rebuild_index, prune_old_scans
 BUGHUNT   = Path.home() / 'bughunt'
 TOKEN     = os.environ.get('GITHUB_TOKEN', '')
 RUN_ID    = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')
-MAX_REPOS = 10
+MAX_REPOS = 30
 SLEEP_SEC = 2
 THREAD_INTEL_PATH = Path.home() / 'projects' / 'krabbi-thread-intelligence'
 DO_AUTO_TRIAGE = True  # Set False to skip auto-triage
