@@ -113,11 +113,71 @@ def load_raw(scan_dir):
     return raw
 
 
+def get_file_content(clone_path: Path, finding_file: str, line_start: int, line_end: int = None):
+    """Read actual file content from cloned repo for patch generation."""
+    file_path = clone_path / finding_file
+    if not file_path.exists():
+        return None
+    try:
+        lines = file_path.read_text().split('\n')
+        if line_end is None:
+            line_end = line_start + 10
+        # Get context: 3 lines before, the finding lines, 3 lines after
+        start = max(0, line_start - 4)
+        end = min(len(lines), line_end + 4)
+        content = '\n'.join(f'{i+1}: {lines[i]}' for i in range(start, end))
+        return content
+    except:
+        return None
+
+
 def triage_scan(scan_dir, meta):
     """Ask LLM to triage raw findings and return sorted true positives."""
     repo = meta['repo']
     raw = load_raw(scan_dir)
     raw_json = json.dumps(raw, indent=2, default=str)[:14000]
+
+    # Clone the repo to get actual file content for accurate patches
+    clone_path = None
+    try:
+        # Fork if needed
+        subprocess.run(['gh', 'repo', 'fork', repo['full_name'], '--clone=false'],
+                      capture_output=True, timeout=30)
+        time.sleep(2)
+        
+        # Get my username
+        my_user = subprocess.run(
+            ['gh', 'api', 'user', '-q', '.login'],
+            capture_output=True, text=True
+        ).stdout.strip()
+        
+        # Clone
+        clone_path = Path(f"/tmp/bbt_clone_{repo['name']}")
+        if clone_path.exists():
+            shutil.rmtree(clone_path, ignore_errors=True)
+        clone_result = subprocess.run(
+            ['git', 'clone', '--quiet', f'https://github.com/{my_user}/{repo["name"]}'],
+            cwd='/tmp', capture_output=True, text=True, timeout=60
+        )
+        if clone_result.returncode != 0:
+            clone_path = None
+    except Exception as e:
+        print(f"[triage] Clone for content: {e}")
+        clone_path = None
+
+    # Get actual file content for better patches
+    file_contexts = ""
+    if clone_path and clone_path.exists():
+        file_contexts = "\n\n--- ACTUAL FILE CONTENT FOR PATCH GENERATION ---\n"
+        for tool_name, tool_data in raw.items():
+            if isinstance(tool_data, dict) and 'results' in tool_data:
+                for finding in tool_data['results'][:3]:  # First 3 findings per tool
+                    file_path = finding.get('file', '')
+                    line_start = finding.get('line_start', 0)
+                    if file_path:
+                        content = get_file_content(clone_path, file_path, line_start)
+                        if content:
+                            file_contexts += f"\nFile: {file_path} (around line {line_start}):\n{content}\n"
 
     system = """You are a senior application security engineer.
 Return ONLY valid JSON array. No explanation before or after.
@@ -129,35 +189,27 @@ Types: SECRET_HARDCODED, SECRET_IN_HISTORY, INJECTION_SQL, INJECTION_CMD, INJECT
 False positives: test/spec/mock paths, commented code, placeholders (xxx/changeme), os.environ references, node_modules.
 
 PATCH FORMAT - CRITICAL:
-patch_unified_diff must be a VALID UNIFIED DIFF like:
---- a/Dockerfile
-+++ b/Dockerfile
-@@ -1,3 +1,4 @@
- FROM node:18
-+USER node
- RUN npm ci
+patch_unified_diff must be a VALID UNIFIED DIFF.
 
 The patch MUST:
 1. Start with "--- a/<file>" and "+++ b/<file>"  
 2. Include proper hunk headers like "@@ -1,3 +1,4 @@"
 3. Use REAL newline characters in the JSON string (not literal \\n)
 4. Apply cleanly with: git apply patch.diff
-5. NO trailing whitespace on any line - every line must end clean
-6. NO empty lines with spaces/tabs
+5. NO trailing whitespace on any line
+6. Match the EXACT line numbers from the actual file content provided
 
-Common failure reasons:
-- Trailing whitespace on lines (git apply rejects this)
-- Mismatched line counts in hunk headers  
-- Using \\n instead of real newlines in JSON
+IMPORTANT: Use the ACTUAL FILE CONTENT shown above to generate accurate patches.
+If the file content shows line 5 starts with "FROM node:18", your patch header must reference line 5.
 
-Keep patches minimal - only change what's needed to fix the issue.
+Keep patches minimal - only change what's needed.
 
 Sort by severity: CRITICAL > HIGH > MEDIUM > LOW. Return JSON array, empty if no true positives."""
 
     user = f"""Triage these security scan results for {repo['full_name']}.
 
 Language: {repo.get('language','?')} | Stars: {repo.get('stars',0)} | Forks: {repo.get('forks',0)}
-Description: {repo.get('description','N/A')}
+{file_contexts}
 
 Raw scan data (first 14k chars):
 {raw_json}
@@ -169,6 +221,13 @@ Empty array if none."""
         {"role": "system", "content": system},
         {"role": "user", "content": user}
     ])
+
+    # Cleanup clone
+    if clone_path and clone_path.exists():
+        try:
+            shutil.rmtree(clone_path, ignore_errors=True)
+        except:
+            pass
 
     try:
         start = response.find('[')
