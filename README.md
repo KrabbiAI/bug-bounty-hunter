@@ -79,6 +79,7 @@ python3 agent.py
 - **Only public, non-archived, non-fork repos**
 - **No commercial tools** (Snyk, Socket banned)
 - **Clones deleted immediately** after analysis
+- **Last 1000 scans kept** — scans with PRs are NEVER deleted
 
 ## Storage Structure
 
