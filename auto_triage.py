@@ -323,14 +323,12 @@ def make_pr(repo, finding, retries=2):
             subprocess.run(['git', 'checkout', '-b', branch, f'upstream/{default_branch}'],
                           cwd=str(clone), capture_output=True, timeout=30)
 
-            # Apply patch (handle both escaped and real newlines)
+            # Apply patch
             patch = finding.get('patch_unified_diff', '')
             if patch:
-                # Unescape \n to real newlines if needed
-                patch_unescaped = patch.replace('\\n', '\n')
                 patch_file = tmp / 'fix.patch'
-                patch_file.write_text(patch_unescaped)
-                print(f"[triage] Patch content preview: {patch_unescaped[:200]}...")
+                patch_file.write_text(patch)
+                print(f"[triage] Patch first 200 chars: {patch[:200]}")
                 result = subprocess.run(
                     ['git', 'apply', '--index', str(patch_file)],
                     cwd=str(clone), capture_output=True, text=True
