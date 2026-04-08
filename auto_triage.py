@@ -418,6 +418,29 @@ def generate_fix(repo_clone_path: Path, finding: dict) -> tuple[str, str] | tupl
         else:
             return None, f"Line {line_start} invalid"
     
+    elif finding_type == 'INJECTION_CMD':
+        # Command Injection - suggest subprocess over os.system/shell
+        if line_start <= len(lines):
+            target_line = lines[line_start - 1]
+            if 'os.system' in target_line or 'shell=True' in target_line:
+                patch_lines = [
+                    f"--- a/{file_path}",
+                    f"+++ b/{file_path}",
+                    f"@@ -{line_start},1 +{line_start},1 @@",
+                    f"- {target_line.rstrip()}",
+                    f"+ # TODO: Use subprocess.run() with shell=False and list args to prevent command injection"
+                ]
+            else:
+                patch_lines = [
+                    f"--- a/{file_path}",
+                    f"+++ b/{file_path}",
+                    f"@@ -{line_start},1 +{line_start},1 @@",
+                    f"- {target_line.rstrip()}",
+                    f"+ # TODO: Validate and sanitize all user input before passing to shell/commands"
+                ]
+        else:
+            return None, f"Line {line_start} invalid"
+    
     elif finding_type == 'AUTH_MISSING':
         # Missing auth - add TODO comment
         patch_lines = [
