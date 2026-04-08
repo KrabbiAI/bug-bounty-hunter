@@ -89,7 +89,7 @@ export GITHUB_TOKEN="$(cat ~/.secrets/github_token)"
 ## Usage
 
 ```bash
-# Manual run (scans 10 repos)
+# Manual run (scans 20 repos)
 export PATH="$HOME/bin:$HOME/.local/bin:$PATH"
 export GITHUB_TOKEN="$(cat ~/.secrets/github_token)"
 cd ~/bughunt
@@ -129,7 +129,7 @@ Body: {title, head, base, body}
 
 ## Constraints
 
-- **Max 10 repos per run** (runs 2x daily: 03:00 und 09:00)
+- **Max 20 repos per scan (4x daily: 03:00, 09:00, 15:00, 21:00)
 - **Max 15 MB repo size** (GitHub API check vor clone)
 - **Only public, non-archived, non-fork repos**
 - **No commercial tools** (Snyk, Socket banned)
