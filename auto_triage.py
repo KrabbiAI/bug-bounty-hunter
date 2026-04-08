@@ -334,6 +334,17 @@ def main(limit=None, run_id=None):
 
     if pr_url:
         print(f"[triage] PR created: {pr_url}")
+        
+        # Build severity counts from all true positives
+        by_sev = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+        by_type = {}
+        for f in findings:
+            sev = f.get('severity', 'LOW').lower()
+            if sev in by_sev:
+                by_sev[sev] += 1
+            t = f.get('type', 'OTHER')
+            by_type[t] = by_type.get(t, 0) + 1
+
         (scan_dir / 'triage_result.json').write_text(json.dumps({
             'scanned_at': datetime.now(timezone.utc).isoformat(),
             'repo': repo['full_name'],
@@ -341,16 +352,30 @@ def main(limit=None, run_id=None):
             'true_positives': len(findings),
             'best_finding': best_finding,
             'pr_url': pr_url,
-            'result': 'pr_created'
+            'result': 'pr_created',
+            'by_severity': by_sev,
+            'by_type': by_type
         }, indent=2))
 
-        # Update summary.json with pr info
+        # Update summary.json with pr info and severity counts
         summary_file = scan_dir / 'summary.json'
         if summary_file.exists():
             s = json.loads(summary_file.read_text())
             s['findings']['pr_submitted'] = True
             s['findings']['pr_url'] = pr_url
+            s['findings']['true_positives'] = len(findings)
+            s['findings']['by_severity'] = by_sev
+            s['findings']['by_type'] = by_type
             summary_file.write_text(json.dumps(s, indent=2))
+        
+        # Also update meta.json findings_summary
+        meta_file = scan_dir / 'meta.json'
+        if meta_file.exists():
+            m = json.loads(meta_file.read_text())
+            m['findings_summary']['by_severity'] = by_sev
+            m['findings_summary']['by_type'] = by_type
+            m['findings_summary']['findings_after_triage'] = len(findings)
+            meta_file.write_text(json.dumps(m, indent=2))
 
         # Rebuild index
         import importlib, persist

@@ -59,6 +59,8 @@ def persist_scan(scan_result: dict, repo_meta: dict, findings: list, pr_info: di
             'has_raw_findings': has_findings,
             'findings_after_triage': len([f for f in findings if not f.get('false_positive')]) if findings else 0,
             'language': repo_meta.get('language', 'unknown'),
+            'by_severity': {'critical': 0, 'high': 0, 'medium': 0, 'low': 0},
+            'by_type': {},
         }
     }, indent=2))
 
