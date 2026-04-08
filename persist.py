@@ -132,6 +132,7 @@ def rebuild_index():
         'cumulative_by_type': {},
         'languages': {},
         'recent_repos': [],
+        'recent_prs': [],
     }
 
     # Find all scan directories (those with meta.json)
@@ -200,6 +201,18 @@ def rebuild_index():
 
         if len(index['recent_repos']) < 100:
             index['recent_repos'].append(scan_entry)
+
+        # Add to recent_prs if has PR
+        if findings.get('pr_submitted') and len(index['recent_prs']) < 50:
+            pr_entry = {
+                'repo': full_name,
+                'pr_url': findings.get('pr_url'),
+                'pr_number': int(findings.get('pr_url', '').split('/')[-1]) if findings.get('pr_url') else None,
+                'submitted_at': meta.get('scanned_at', ''),
+                'findings_count': findings.get('true_positives', 0),
+                'state': 'open',
+            }
+            index['recent_prs'].append(pr_entry)
 
     (BUGHUNT / 'index.json').write_text(json.dumps(index, indent=2))
     print(f"[index] Rebuilt: {index['total_repos_analyzed']} repos, {index['total_raw_findings']} raw findings")
