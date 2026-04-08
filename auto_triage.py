@@ -187,11 +187,14 @@ def make_pr(repo, finding, retries=2):
         try:
             # Clone fork
             clone_result = subprocess.run(
-                ['git', 'clone', '--quiet', f'https://github.com/{my_user}/{name}'],
-                cwd='/tmp', capture_output=True, text=True, timeout=60
+                ['git', 'clone', f'https://github.com/{my_user}/{name}'],
+                cwd=str(tmp), capture_output=True, text=True, timeout=60
             )
             clone = tmp / name
+            print(f"[triage] Clone attempt {attempt}: {clone} exists={clone.exists()}, returncode={clone_result.returncode}")
             if clone_result.returncode != 0 or not clone.exists():
+                clone_err = clone_result.stderr.strip()[:200] if clone_result.stderr else 'unknown'
+                print(f"[triage] Clone attempt {attempt} failed: {clone_err}")
                 if attempt < retries:
                     time.sleep(5)
                     shutil.rmtree(tmp, ignore_errors=True)
