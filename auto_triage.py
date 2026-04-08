@@ -53,14 +53,19 @@ def llm_chat(messages: list) -> str:
         return '{"error": "' + str(e) + '"}'
 
 
-def find_best_scan():
-    """Find scan with most raw findings that hasn't been triaged yet."""
+def find_best_scan(run_id: str = None, limit: int = None):
+    """Find scan with most raw findings from current run, sorted newest first.
+    
+    Args:
+        run_id: Only scans from this run_id (YYYYMMDD_HHMM)
+        limit: Only look at the N most recent scans (from current run)
+    """
     candidates = []
     for sd in BUGHUNT.glob('scans/*/*/*/*/'):
         meta_file = sd / 'meta.json'
         triage_file = sd / 'triage_result.json'
         
-        # Skip if already triaged with no true positives
+        # Skip if already triaged
         if triage_file.exists():
             try:
                 triage_data = json.loads(triage_file.read_text())
@@ -74,11 +79,27 @@ def find_best_scan():
         try:
             meta = json.loads(meta_file.read_text())
             raw = meta.get('findings_summary', {}).get('raw_findings_count', 0)
+            scan_run_id = meta.get('run_id', '')
+            
+            # Filter to current run if specified
+            if run_id and scan_run_id != run_id:
+                continue
+            
             if raw > 0:
                 candidates.append((sd, meta, raw))
         except:
             pass
+    
+    # Sort by newest first (by mtime)
+    candidates.sort(key=lambda x: x[0].stat().st_mtime, reverse=True)
+    
+    # Limit to N most recent
+    if limit:
+        candidates = candidates[:limit]
+    
+    # Sort remaining by raw findings count (worst first)
     candidates.sort(key=lambda x: x[2], reverse=True)
+    
     return candidates[0] if candidates else None, candidates
 
 
@@ -246,10 +267,18 @@ def make_pr(repo, finding):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def main():
-    print("[triage] Starting auto triage...")
+def main(limit=None, run_id=None):
+    import sys
+    
+    # Allow CLI args as fallback
+    if limit is None and len(sys.argv) >= 2:
+        limit = int(sys.argv[1])
+    if run_id is None and len(sys.argv) >= 3:
+        run_id = sys.argv[2]
+    
+    print(f"[triage] Starting auto triage (limit={limit}, run_id={run_id})...")
 
-    best, all_scans = find_best_scan()
+    best, all_scans = find_best_scan(run_id=run_id, limit=limit)
     if not best:
         print("[triage] No scans with findings found")
         return

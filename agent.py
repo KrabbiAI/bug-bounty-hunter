@@ -149,12 +149,25 @@ def main():
     log(f"=== Run complete. Processed: {processed} repos ===")
 
     # Phase 8 — Auto Triage + PR (if enabled)
+    triage_result = None
     if DO_AUTO_TRIAGE:
-        log("[agent] Running auto triage...")
+        log(f"[agent] Running auto triage on last {processed} repos...")
         try:
             import importlib, auto_triage
             importlib.reload(auto_triage)
-            auto_triage.main()
+            auto_triage.main(limit=processed, run_id=RUN_ID)
+            # Read triage result if PR was created
+            triage_files = sorted(BUGHUNT.glob('scans/*/*/*/*/triage_result.json'),
+                                  key=lambda p: p.stat().st_mtime, reverse=True)
+            if triage_files:
+                triage_data = json.loads(triage_files[0].read_text())
+                if triage_data.get('result') == 'pr_created':
+                    triage_result = {
+                        'repo': triage_data.get('repo', ''),
+                        'pr_url': triage_data.get('pr_url', ''),
+                        'severity': triage_data.get('best_finding', {}).get('severity', ''),
+                        'title': triage_data.get('best_finding', {}).get('title', ''),
+                    }
         except Exception as e:
             log(f"[agent] Triage failed: {e}")
 
@@ -162,11 +175,17 @@ def main():
     mirror_to_thread_intelligence()
 
     # Phase 10 — Send Telegram summary
-    send_telegram_summary(processed, run_repos)
+    send_telegram_summary(processed, run_repos, triage_result=triage_result)
 
 
-def send_telegram_summary(processed: int, run_repos: list):
-    """Send a summary message to Telegram after scan completion."""
+def send_telegram_summary(processed: int, run_repos: list, triage_result: dict = None):
+    """Send a summary message to Telegram after scan completion.
+    
+    Args:
+        processed: Number of repos scanned in this session
+        run_repos: List of repo metadata dicts
+        triage_result: Optional dict with keys: repo, pr_url, severity, title
+    """
     import urllib.request, urllib.parse
 
     index_file = BUGHUNT / 'index.json'
@@ -202,6 +221,17 @@ def send_telegram_summary(processed: int, run_repos: list):
                 pass
     findings_str = '\n'.join([f"  • {r['repo']}: {r['raw']} raw" for r in recent_with_findings if r['raw'] > 0]) or '  None'
 
+    # Build PR section if triage found something
+    pr_section = ""
+    if triage_result and triage_result.get('pr_url'):
+        sev_emoji = {'CRITICAL': '🔴', 'HIGH': '🟠', 'MEDIUM': '🟡', 'LOW': '🟢'}.get(
+            triage_result.get('severity', ''), '⚪')
+        pr_section = f"""
+
+✨ *PR Created!*
+{sev_emoji} [{triage_result.get('severity', '?')}] {triage_result.get('title', 'Security fix')}
+🔗 {triage_result.get('pr_url', '')}"""
+
     msg = f"""🦀 *Bug Bounty Hunter — Scan Complete*
 
 📊 *Session:* {processed} repos scanned
@@ -209,10 +239,8 @@ def send_telegram_summary(processed: int, run_repos: list):
 
 🔍 *This run:*
 {findings_str}
-
 📂 *Languages:* {langs_str}
-
-🔴 Critical: {sev.get('critical', 0)} | 🟠 High: {sev.get('high', 0)} | 🟡 Medium: {sev.get('medium', 0)}
+🔴 Critical: {sev.get('critical', 0)} | 🟠 High: {sev.get('high', 0)} | 🟡 Medium: {sev.get('medium', 0)}{pr_section}
 
 Dashboard: https://serene-daifuku-1d5503.netlify.app"""
 
