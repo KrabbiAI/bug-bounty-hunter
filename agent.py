@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """agent.py — Bug Bounty Hunter scan orchestrator for cron."""
-import json, os, sys, time, subprocess
+import json, os, sys, time, subprocess, argparse
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -12,10 +12,16 @@ from persist import persist_scan, rebuild_index, prune_old_scans
 BUGHUNT   = Path.home() / 'bughunt'
 TOKEN     = os.environ.get('GITHUB_TOKEN', '')
 RUN_ID    = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')
-MAX_REPOS = 20
 SLEEP_SEC = 2
 THREAD_INTEL_PATH = Path.home() / 'projects' / 'krabbi-thread-intelligence'
 DO_AUTO_TRIAGE = True  # Set False to skip auto-triage
+
+# Parse arguments
+parser = argparse.ArgumentParser(description='Bug Bounty Hunter Scanner')
+parser.add_argument('--max_repos', type=int, default=20, help='Number of repos to scan (default: 20)')
+parser.add_argument('--dry_run', action='store_true', help='Dry run - no PRs')
+args = parser.parse_args()
+MAX_REPOS = args.max_repos
 
 
 def log(msg):

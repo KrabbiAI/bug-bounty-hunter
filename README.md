@@ -95,12 +95,22 @@ export GITHUB_TOKEN="$(cat ~/.secrets/github_token)"
 cd ~/bughunt
 python3 agent.py
 
+# Specific repo count
+python3 agent.py --max_repos 10
+
 # Dry run (keine PRs, nur analysis)
 python3 agent.py --dry_run
 
-# Specific repo count
-python3 agent.py --max_repos 5
+# Oder nutze das wrapper script:
+./reposcan.sh <num_repos>
+./reposcan.sh 20
 ```
+
+## Telegram Commands
+
+Gib in Telegram ein: `/reposcan X` (z.B. `/reposcan 20`)
+
+Der Agent startet dann einen manuellen Scan mit X Repos. Keine extra Konfiguration nötig — einfach den Befehl senden.
 
 ## API Endpoints
 
