@@ -139,7 +139,7 @@ Body: {title, head, base, body}
 
 ## Constraints
 
-- **Max 20 repos per scan (4x daily: 03:00, 09:00, 15:00, 21:00)
+- **Max 5 repos per scan (4x daily: 03:00, 09:00, 15:00, 21:00)** — each repo gets triaged
 - **Max 15 MB repo size** (GitHub API check vor clone)
 - **Only public, non-archived, non-fork repos**
 - **No commercial tools** (Snyk, Socket banned)
