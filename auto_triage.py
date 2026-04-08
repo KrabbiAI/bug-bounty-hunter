@@ -302,99 +302,99 @@ def main(limit=None, run_id=None):
     print(f"[triage] Starting auto triage (limit={limit}, run_id={run_id})...")
 
     best, all_scans = find_best_scan(run_id=run_id, limit=limit)
-    if not best:
+    if not all_scans:
         print("[triage] No scans with findings found")
         return
 
-    scan_dir, meta, raw_count = best
-    repo = meta['repo']
+    prs_created = 0
+    for scan_dir, meta, raw_count in all_scans:
+        repo = meta['repo']
+        print(f"\n[triage] Triaging: {repo['full_name']} — {raw_count} raw findings")
 
-    print(f"[triage] Best candidate: {repo['full_name']} — {raw_count} raw findings")
-    print(f"[triage] Running LLM triage...")
+        findings = triage_scan(scan_dir, meta)
 
-    findings = triage_scan(scan_dir, meta)
+        if not findings:
+            print(f"[triage] No true positives found")
+            (scan_dir / 'triage_result.json').write_text(json.dumps({
+                'scanned_at': datetime.now(timezone.utc).isoformat(),
+                'repo': repo['full_name'],
+                'raw_count': raw_count,
+                'true_positives': 0,
+                'result': 'no_true_positives'
+            }, indent=2))
+            continue
 
-    if not findings:
-        print("[triage] No true positives found")
-        (scan_dir / 'triage_result.json').write_text(json.dumps({
-            'scanned_at': datetime.now(timezone.utc).isoformat(),
-            'repo': repo['full_name'],
-            'raw_count': raw_count,
-            'true_positives': 0,
-            'result': 'no_true_positives'
-        }, indent=2))
-        return
+        print(f"[triage] Found {len(findings)} true positives")
+        best_finding = findings[0]
+        print(f"[triage] Worst: [{best_finding.get('severity')}] {best_finding.get('title')}")
 
-    print(f"[triage] Found {len(findings)} true positives")
-    best_finding = findings[0]
-    print(f"[triage] Worst: [{best_finding.get('severity')}] {best_finding.get('title')}")
+        print(f"[triage] Creating PR (with retry)...")
+        pr_url, err = make_pr(repo, best_finding)
 
-    print(f"[triage] Creating PR (with retry)...")
-    pr_url, err = make_pr(repo, best_finding)
+        if pr_url:
+            print(f"[triage] PR created: {pr_url}")
+            prs_created += 1
+            
+            # Build severity counts from all true positives
+            by_sev = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+            by_type = {}
+            for f in findings:
+                sev = f.get('severity', 'LOW').lower()
+                if sev in by_sev:
+                    by_sev[sev] += 1
+                t = f.get('type', 'OTHER')
+                by_type[t] = by_type.get(t, 0) + 1
 
-    if pr_url:
-        print(f"[triage] PR created: {pr_url}")
-        
-        # Build severity counts from all true positives
-        by_sev = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
-        by_type = {}
-        for f in findings:
-            sev = f.get('severity', 'LOW').lower()
-            if sev in by_sev:
-                by_sev[sev] += 1
-            t = f.get('type', 'OTHER')
-            by_type[t] = by_type.get(t, 0) + 1
+            (scan_dir / 'triage_result.json').write_text(json.dumps({
+                'scanned_at': datetime.now(timezone.utc).isoformat(),
+                'repo': repo['full_name'],
+                'raw_count': raw_count,
+                'true_positives': len(findings),
+                'best_finding': best_finding,
+                'pr_url': pr_url,
+                'result': 'pr_created',
+                'by_severity': by_sev,
+                'by_type': by_type
+            }, indent=2))
 
-        (scan_dir / 'triage_result.json').write_text(json.dumps({
-            'scanned_at': datetime.now(timezone.utc).isoformat(),
-            'repo': repo['full_name'],
-            'raw_count': raw_count,
-            'true_positives': len(findings),
-            'best_finding': best_finding,
-            'pr_url': pr_url,
-            'result': 'pr_created',
-            'by_severity': by_sev,
-            'by_type': by_type
-        }, indent=2))
+            # Update summary.json with pr info and severity counts
+            summary_file = scan_dir / 'summary.json'
+            if summary_file.exists():
+                s = json.loads(summary_file.read_text())
+                s['findings']['pr_submitted'] = True
+                s['findings']['pr_url'] = pr_url
+                s['findings']['true_positives'] = len(findings)
+                s['findings']['by_severity'] = by_sev
+                s['findings']['by_type'] = by_type
+                summary_file.write_text(json.dumps(s, indent=2))
+            
+            # Also update meta.json findings_summary
+            meta_file = scan_dir / 'meta.json'
+            if meta_file.exists():
+                m = json.loads(meta_file.read_text())
+                m['findings_summary']['by_severity'] = by_sev
+                m['findings_summary']['by_type'] = by_type
+                m['findings_summary']['findings_after_triage'] = len(findings)
+                meta_file.write_text(json.dumps(m, indent=2))
 
-        # Update summary.json with pr info and severity counts
-        summary_file = scan_dir / 'summary.json'
-        if summary_file.exists():
-            s = json.loads(summary_file.read_text())
-            s['findings']['pr_submitted'] = True
-            s['findings']['pr_url'] = pr_url
-            s['findings']['true_positives'] = len(findings)
-            s['findings']['by_severity'] = by_sev
-            s['findings']['by_type'] = by_type
-            summary_file.write_text(json.dumps(s, indent=2))
-        
-        # Also update meta.json findings_summary
-        meta_file = scan_dir / 'meta.json'
-        if meta_file.exists():
-            m = json.loads(meta_file.read_text())
-            m['findings_summary']['by_severity'] = by_sev
-            m['findings_summary']['by_type'] = by_type
-            m['findings_summary']['findings_after_triage'] = len(findings)
-            meta_file.write_text(json.dumps(m, indent=2))
+        else:
+            print(f"[triage] PR failed: {err}")
+            (scan_dir / 'triage_result.json').write_text(json.dumps({
+                'scanned_at': datetime.now(timezone.utc).isoformat(),
+                'repo': repo['full_name'],
+                'raw_count': raw_count,
+                'true_positives': len(findings),
+                'best_finding': best_finding,
+                'result': 'pr_failed',
+                'error': err
+            }, indent=2))
 
-        # Rebuild index
-        import importlib, persist
-        importlib.reload(persist)
-        persist.rebuild_index()
+    # Rebuild index once at the end
+    import importlib, persist
+    importlib.reload(persist)
+    persist.rebuild_index()
 
-    else:
-        print(f"[triage] PR failed: {err}")
-        (scan_dir / 'triage_result.json').write_text(json.dumps({
-            'scanned_at': datetime.now(timezone.utc).isoformat(),
-            'repo': repo['full_name'],
-            'raw_count': raw_count,
-            'true_positives': len(findings),
-            'best_finding': best_finding,
-            'result': 'pr_failed',
-            'error': err
-        }, indent=2))
-
-    print("[triage] Done!")
+    print(f"\n[triage] Done! PRs created: {prs_created}/{len(all_scans)}")
 
 
 if __name__ == '__main__':

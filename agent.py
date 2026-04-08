@@ -18,7 +18,7 @@ DO_AUTO_TRIAGE = True  # Set False to skip auto-triage
 
 # Parse arguments
 parser = argparse.ArgumentParser(description='Bug Bounty Hunter Scanner')
-parser.add_argument('--max_repos', type=int, default=20, help='Number of repos to scan (default: 20)')
+parser.add_argument('--max_repos', type=int, default=5, help='Number of repos to scan (default: 5)')
 parser.add_argument('--dry_run', action='store_true', help='Dry run - no PRs')
 args = parser.parse_args()
 MAX_REPOS = args.max_repos
