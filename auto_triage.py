@@ -2,7 +2,7 @@
 """
 auto_triage.py — Triage latest scan findings via MiniMax LLM and create PR for worst finding.
 """
-import json, os, sys, subprocess, shutil
+import json, os, sys, subprocess, shutil, time
 import urllib.request, urllib.parse, urllib.error
 from pathlib import Path
 from datetime import datetime, timezone
@@ -54,7 +54,7 @@ def llm_chat(messages: list) -> str:
 
 
 def find_best_scan(run_id: str = None, limit: int = None):
-    """Find scan with most raw findings from current run, sorted newest first.
+    """Find scan with most raw findings that hasn't been triaged yet.
     
     Args:
         run_id: Only scans from this run_id (YYYYMMDD_HHMM)
@@ -121,11 +121,13 @@ def triage_scan(scan_dir, meta):
 
     system = """You are a senior application security engineer.
 Return ONLY valid JSON array. No explanation before or after.
-For each true positive: severity, cvss_score, type, tool, file, line_start, title, description, snippet_masked (secrets masked as ***), patch_unified_diff (apply cleanly), pr_explanation (3 sentences for maintainer), remediation (step by step), cwe.
+For each true positive: severity, cvss_score, type, tool, file, line_start, title, description, snippet_masked (secrets masked as ***), patch_unified_diff (apply cleanly with real newlines, not \\n), pr_explanation (3 sentences for maintainer), remediation (step by step), cwe.
 
 Types: SECRET_HARDCODED, SECRET_IN_HISTORY, INJECTION_SQL, INJECTION_CMD, INJECTION_PATH, AUTH_MISSING, INSECURE_RANDOM, DEPRECATED_CRYPTO, SSRF, CVE_DEPENDENCY, OTHER
 
 False positives: test/spec/mock paths, commented code, placeholders (xxx/changeme), os.environ references, node_modules.
+
+IMPORTANT: patch_unified_diff must use REAL newline characters (\\n), not the literal string \\n. The patch must apply cleanly with `git apply`.
 
 Sort by severity: CRITICAL > HIGH > MEDIUM > LOW. Return JSON array, empty if no true positives."""
 
@@ -159,16 +161,17 @@ Empty array if none."""
     return []
 
 
-def make_pr(repo, finding):
-    """Create PR with the fix."""
+def make_pr(repo, finding, retries=2):
+    """Create PR with the fix. Retries on clone failure."""
     owner = repo['owner']
     name = repo['name']
     full = f"{owner}/{name}"
     branch = f"security/auto-fix-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}"
 
-    # Fork
+    # Fork (idempotent - fine if already exists)
     subprocess.run(['gh', 'repo', 'fork', full, '--clone=false'],
                   capture_output=True, timeout=30)
+    time.sleep(3)  # Give GitHub time to create the fork
 
     # Get my username
     my_user = subprocess.run(
@@ -176,67 +179,73 @@ def make_pr(repo, finding):
         capture_output=True, text=True
     ).stdout.strip()
 
-    tmp = Path('/tmp') / f'bbt_{datetime.now().strftime("%Y%m%d%H%M")}'
-    tmp.mkdir()
+    clone = None
+    for attempt in range(retries + 1):
+        tmp = Path('/tmp') / f'bbt_{datetime.now().strftime("%Y%m%d%H%M")}_{attempt}'
+        tmp.mkdir(parents=True, exist_ok=True)
 
-    try:
-        # Clone fork
-        subprocess.run(
-            ['git', 'clone', f'https://github.com/{my_user}/{name}'],
-            cwd='/tmp', capture_output=True, timeout=30
-        )
-        clone = tmp / name
-        if not clone.exists():
-            return None, "Clone failed"
+        try:
+            # Clone fork
+            clone_result = subprocess.run(
+                ['git', 'clone', '--quiet', f'https://github.com/{my_user}/{name}'],
+                cwd='/tmp', capture_output=True, text=True, timeout=60
+            )
+            clone = tmp / name
+            if clone_result.returncode != 0 or not clone.exists():
+                if attempt < retries:
+                    time.sleep(5)
+                    shutil.rmtree(tmp, ignore_errors=True)
+                    continue
+                return None, f"Clone failed after {retries+1} attempts"
 
-        # Add upstream
-        subprocess.run(['git', 'remote', 'add', 'upstream', f'https://github.com/{full}'],
-                      cwd=str(clone), capture_output=True)
-        subprocess.run(['git', 'fetch', 'upstream', '--quiet'],
-                      cwd=str(clone), capture_output=True, timeout=30)
+            # Add upstream
+            subprocess.run(['git', 'remote', 'add', 'upstream', f'https://github.com/{full}'],
+                          cwd=str(clone), capture_output=True)
+            subprocess.run(['git', 'fetch', 'upstream', '--quiet'],
+                          cwd=str(clone), capture_output=True, timeout=60)
 
-        # Get default branch
-        upstream_info = subprocess.run(
-            ['git', 'remote', 'show', 'upstream'],
-            cwd=str(clone), capture_output=True, text=True
-        )
-        default_branch = 'main'
-        for line in upstream_info.stdout.split('\n'):
-            if 'HEAD branch' in line:
-                default_branch = line.split(':')[1].strip()
-                break
-
-        subprocess.run(['git', 'checkout', '-b', branch, f'upstream/{default_branch}'],
-                      cwd=str(clone), capture_output=True, timeout=10)
-
-        # Apply patch
-        patch = finding.get('patch_unified_diff', '')
-        if patch:
-            patch_file = tmp / 'fix.patch'
-            patch_file.write_text(patch)
-            result = subprocess.run(
-                ['git', 'apply', '--index', str(patch_file)],
+            # Get default branch
+            upstream_info = subprocess.run(
+                ['git', 'remote', 'show', 'upstream'],
                 cwd=str(clone), capture_output=True, text=True
             )
-            if result.returncode == 0:
-                subprocess.run(
-                    ['git', 'add', '.'],
-                    cwd=str(clone), capture_output=True
-                )
-                subprocess.run(
-                    ['git', 'commit', '-m', f"security: {finding.get('title', 'auto-fix')}"],
-                    cwd=str(clone), capture_output=True
-                )
-                subprocess.run(
-                    ['git', 'push', 'origin', branch, '--quiet'],
-                    cwd=str(clone), capture_output=True, timeout=30
-                )
-            else:
-                return None, f"Patch failed: {result.stderr[:200]}"
+            default_branch = 'main'
+            for line in upstream_info.stdout.split('\n'):
+                if 'HEAD branch' in line:
+                    default_branch = line.split(':')[1].strip()
+                    break
 
-        # Create PR
-        pr_title = f"[Security] {finding.get('title', 'Automated fix')} — {datetime.now().strftime('%Y-%m-%d')}"
-        pr_body = f"""## Automated Security Finding
+            subprocess.run(['git', 'checkout', '-b', branch, f'upstream/{default_branch}'],
+                          cwd=str(clone), capture_output=True, timeout=30)
+
+            # Apply patch (handle both escaped and real newlines)
+            patch = finding.get('patch_unified_diff', '')
+            if patch:
+                # Unescape \n to real newlines if needed
+                patch_unescaped = patch.replace('\\n', '\n')
+                patch_file = tmp / 'fix.patch'
+                patch_file.write_text(patch_unescaped)
+                result = subprocess.run(
+                    ['git', 'apply', '--index', str(patch_file)],
+                    cwd=str(clone), capture_output=True, text=True
+                )
+                if result.returncode == 0:
+                    subprocess.run(['git', 'add', '.'],
+                                  cwd=str(clone), capture_output=True)
+                    subprocess.run(
+                        ['git', 'commit', '-m', f"security: {finding.get('title', 'auto-fix')}"],
+                        cwd=str(clone), capture_output=True
+                    )
+                    subprocess.run(
+                        ['git', 'push', 'origin', branch, '--quiet'],
+                        cwd=str(clone), capture_output=True, timeout=60
+                    )
+                else:
+                    return None, f"Patch failed: {result.stderr[:200]}"
+
+            # Create PR
+            pr_title = f"[Security] {finding.get('title', 'Automated fix')} — {datetime.now().strftime('%Y-%m-%d')}"
+            pr_body = f"""## Automated Security Finding
 
 **Severity:** {finding.get('severity', '?')} | **CVSS:** {finding.get('cvss_score', '?')} | **CWE:** {finding.get('cwe', 'N/A')}
 
@@ -249,22 +258,36 @@ def make_pr(repo, finding):
 ---
 *Automated PR by Krabbi Bug Bounty Hunter*"""
 
-        result = subprocess.run(
-            ['gh', 'pr', 'create',
-             '--repo', full,
-             '--title', pr_title,
-             '--body', pr_body,
-             '--label', 'security',
-             '--head', f'{my_user}:{branch}'],
-            capture_output=True, text=True, timeout=30
-        )
+            result = subprocess.run(
+                ['gh', 'pr', 'create',
+                 '--repo', full,
+                 '--title', pr_title,
+                 '--body', pr_body,
+                 '--head', f'{my_user}:{branch}'],
+                capture_output=True, text=True, timeout=30
+            )
 
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip(), None
-        return None, f"PR failed: {result.stderr[:200]}"
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip(), None
+            return None, f"PR failed: {result.stderr[:200]}"
 
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        except subprocess.TimeoutExpired:
+            if attempt < retries:
+                time.sleep(5)
+                continue
+            return None, "Timeout after retries"
+        except Exception as e:
+            if attempt < retries:
+                time.sleep(5)
+                continue
+            return None, str(e)
+        finally:
+            if clone:
+                shutil.rmtree(tmp, ignore_errors=True)
+            else:
+                shutil.rmtree(tmp, ignore_errors=True)
+    
+    return None, "Max retries exceeded"
 
 
 def main(limit=None, run_id=None):
@@ -293,7 +316,6 @@ def main(limit=None, run_id=None):
 
     if not findings:
         print("[triage] No true positives found")
-        # Write empty result
         (scan_dir / 'triage_result.json').write_text(json.dumps({
             'scanned_at': datetime.now(timezone.utc).isoformat(),
             'repo': repo['full_name'],
@@ -307,7 +329,7 @@ def main(limit=None, run_id=None):
     best_finding = findings[0]
     print(f"[triage] Worst: [{best_finding.get('severity')}] {best_finding.get('title')}")
 
-    print(f"[triage] Creating PR...")
+    print(f"[triage] Creating PR (with retry)...")
     pr_url, err = make_pr(repo, best_finding)
 
     if pr_url:
