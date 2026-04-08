@@ -128,6 +128,26 @@ def main():
         })
 
         processed += 1
+        # Count raw findings for notification
+        raw_dir = BUGHUNT / result['scan_dir'] / 'raw'
+        raw_count = 0
+        for f in raw_dir.glob('*.json'):
+            try:
+                data = json.loads(f.read_text())
+                if f.stem == 'semgrep':
+                    raw_count += len(data.get('results', []))
+                elif f.stem == 'bandit':
+                    raw_count += len(data.get('results', []))
+                elif f.stem in ('trufflehog', 'gitleaks'):
+                    raw_count += len(data) if isinstance(data, list) else 0
+                elif f.stem == 'detect_secrets':
+                    raw_count += sum(len(v) for v in data.get('results', {}).values())
+                elif f.stem in ('pip_audit', 'npm_audit'):
+                    raw_count += len(data.get('vulnerabilities', {}))
+            except:
+                pass
+        result['raw_findings_count'] = raw_count
+        send_repo_scanned(processed, MAX_REPOS, meta, result)
         time.sleep(SLEEP_SEC)
 
     # Phase 5 — Rebuild index
@@ -260,6 +280,44 @@ Dashboard: https://serene-daifuku-1d5503.netlify.app"""
         log("[telegram] Summary sent")
     except Exception as e:
         log(f"[telegram] Failed: {e}")
+
+
+def send_repo_scanned(num: int, total: int, meta: dict, result: dict):
+    """Send Telegram notification after each repo is scanned."""
+    import urllib.request, urllib.parse
+
+    raw_count = result.get('raw_findings_count', 0)
+    lang = meta.get('language', '?')
+    size_mb = meta.get('size_kb', 0) / 1024
+    stars = meta.get('stars', 0)
+    repo_name = meta.get('full_name', '?')
+
+    next_msg = ""
+    if num < total:
+        next_num = num + 1
+        next_msg = f"\n🔄 Starting next scan ({next_num}/{total})..."
+
+    msg = f"""📦 *Repo {num} von {total} wurde gescannt*
+
+🔗 {repo_name}
+📂 {lang} | {size_mb:.1f} MB | ⭐ {stars}
+🔍 {raw_count} raw findings{next_msg}"""
+
+    token = "8798400513:AAHVGh4T2dtsEXZML6zmtXLNLVPM4lpAcZE"
+    chat_id = "631196199"
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+
+    data = urllib.parse.urlencode({
+        'chat_id': chat_id,
+        'text': msg,
+        'parse_mode': 'Markdown',
+    }).encode()
+
+    try:
+        req = urllib.request.Request(url, data=data)
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as e:
+        log(f"[telegram] Per-repo notification failed: {e}")
 
 
 if __name__ == '__main__':
