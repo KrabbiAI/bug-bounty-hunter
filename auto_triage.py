@@ -310,6 +310,7 @@ def make_pr(repo, finding, retries=2):
                 patch_unescaped = patch.replace('\\n', '\n')
                 patch_file = tmp / 'fix.patch'
                 patch_file.write_text(patch_unescaped)
+                print(f"[triage] Patch content preview: {patch_unescaped[:200]}...")
                 result = subprocess.run(
                     ['git', 'apply', '--index', str(patch_file)],
                     cwd=str(clone), capture_output=True, text=True
