@@ -74,7 +74,7 @@ python3 agent.py
 
 ## Constraints
 
-- **Max 30 repos per run**
+- **Max 10 repos per run** (runs 2x daily: 03:00 and 09:00)
 - **Max 15 MB repo size** (GitHub API check before clone)
 - **Only public, non-archived, non-fork repos**
 - **No commercial tools** (Snyk, Socket banned)
