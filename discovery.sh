@@ -30,15 +30,16 @@ curl -sf -H "Authorization: token $GITHUB_TOKEN" \
 >> /tmp/discovered_raw.txt
 sleep 2
 
-### Strategy B — Random since-ID (true random, only with language)
-echo "[discovery] Strategy B: random since-ID"
-for i in {1..4}; do
-  RAND_ID=$(python3 -c "import random; print(random.randint(10000000, 900000000))")
+### Strategy B — Random page from search API (uniformly random, language-specific)
+echo "[discovery] Strategy B: random page search"
+for i in {1..3}; do
+  LANG=${LANGUAGES[$RANDOM % ${#LANGUAGES[@]}]}
+  PAGE=$((RANDOM % 50 + 1))  # Random page 1-50 for fresh results
   curl -sf -H "Authorization: token $GITHUB_TOKEN" \
-    "https://api.github.com/repositories?since=${RAND_ID}&per_page=30" \
-  | jq -r '.[]? | select(.fork==false and .private==false and .language!=null) | .html_url' \
+    "https://api.github.com/search/repositories?q=language:${LANG}+fork:false&sort=updated&per_page=100&page=${PAGE}" \
+  | jq -r '.items[]? | select(.archived==false and .private==false) | .html_url' \
   >> /tmp/discovered_raw.txt
-  sleep 1
+  sleep 2
 done
 
 ### Strategy C — Topic hunt (only with language)
