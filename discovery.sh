@@ -46,9 +46,12 @@ curl -sf -H "Authorization: token $GITHUB_TOKEN" \
 sleep 2
 
 ### Deduplicate + filter
+# Extract URLs from blocklist (ignore the tab-separated reason)
+grep -v '^#' "$BLOCKLIST" | cut -f1 > /tmp/blocklist_urls.txt 2>/dev/null || true
+
 sort -u /tmp/discovered_raw.txt \
 | grep -v -F -f "$PROCESSED_FILE" \
-| grep -v -F -f "$BLOCKLIST" \
+| grep -v -F -f /tmp/blocklist_urls.txt \
 > "$QUEUE_FILE"
 
 QUEUE_SIZE=$(wc -l < "$QUEUE_FILE")

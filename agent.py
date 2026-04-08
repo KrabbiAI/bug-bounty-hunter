@@ -101,9 +101,13 @@ def main():
         # Phase 2 — Size gate (15 MB limit)
         check = check_repo(url, TOKEN)
         if not check['ok']:
-            log(f"  SKIP ({check['reason']})")
-            with open(BUGHUNT / 'processed.txt', 'a') as f:
-                f.write(url + '\n')
+            reason = check['reason']
+            log(f"  SKIP ({reason})")
+            # Only permanently block true "never retry" reasons
+            permanent_skip_reasons = ('archived', 'fork', 'private', 'disabled', 'api_error', 'json_error')
+            if any(r in reason for r in permanent_skip_reasons):
+                with open(BUGHUNT / 'blocklist.txt', 'a') as f:
+                    f.write(f"{url}\t{reason}\n")
             continue
 
         meta = check['meta']
