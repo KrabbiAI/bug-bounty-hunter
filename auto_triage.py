@@ -298,26 +298,17 @@ def generate_fix(repo_clone_path: Path, finding: dict) -> tuple[str, str] | tupl
     
     # Generate fix based on type
     if finding_type == 'CVE_DEPENDENCY':
-        # CVE - try to update vulnerable dependency
-        # Look for package files
-        if 'package.json' in file_path:
+        # CVE - add TODO comment about updating dependency
+        # CVE issues are about package versions, not code lines - just add a comment
+        if line_start <= len(lines):
             patch_lines = [
                 f"--- a/{file_path}",
                 f"+++ b/{file_path}",
-                f"@@ -{line_start},1 +{line_start},1 @@",
-                f"- Update vulnerable dependency detected at this location",
-                f"+ # TODO: Update to patched version of dependency"
-            ]
-        elif 'requirements.txt' in file_path or 'Pipfile' in file_path:
-            patch_lines = [
-                f"--- a/{file_path}",
-                f"+++ b/{file_path}",
-                f"@@ -{line_start},1 +{line_start},1 @@",
-                f"- Update vulnerable dependency",
-                f"+ # TODO: Update to patched version"
+                f"@@ -{line_start},0 +{line_start},0 @@",
+                f"+ # TODO: Update this dependency to a patched version to fix CVE"
             ]
         else:
-            return None, f"No fix pattern for CVE in {file_path}"
+            return None, f"Line {line_start} invalid"
     
     elif finding_type == 'SECRET_HARDCODED':
         # Hardcoded secret - add TODO comment or use env var
