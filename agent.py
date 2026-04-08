@@ -260,14 +260,13 @@ PR Created!
 [{triage_result.get('severity', '?')}] {triage_result.get('title', 'Security fix')}
 {triage_result.get('pr_url', '')}"""
 
-    msg = f"""🦀 Bug Bounty Hunter — Scan Complete
+    msg = f"""Bug Bounty Hunter — Scan Complete
 
 Session: {processed} repos
 Total: {total_repos} repos | {total_raw} raw findings | {total_prs} PRs
 
 This run:
 {findings_str}
-Languages: {langs_str}
 Critical: {sev.get('critical', 0)} | High: {sev.get('high', 0)} | Medium: {sev.get('medium', 0)}{pr_section}
 
 Dashboard: https://serene-daifuku-1d5503.netlify.app"""
@@ -279,7 +278,6 @@ Dashboard: https://serene-daifuku-1d5503.netlify.app"""
     data = urllib.parse.urlencode({
         'chat_id': chat_id,
         'text': msg,
-        'parse_mode': 'Markdown',
     }).encode()
 
     try:

@@ -121,13 +121,30 @@ def triage_scan(scan_dir, meta):
 
     system = """You are a senior application security engineer.
 Return ONLY valid JSON array. No explanation before or after.
-For each true positive: severity, cvss_score, type, tool, file, line_start, title, description, snippet_masked (secrets masked as ***), patch_unified_diff (apply cleanly with real newlines, not \\n), pr_explanation (3 sentences for maintainer), remediation (step by step), cwe.
+
+For each true positive provide: severity, cvss_score, type, tool, file, line_start, title, description, snippet_masked (secrets masked as ***), patch_unified_diff, pr_explanation (3 sentences), remediation (step by step), cwe.
 
 Types: SECRET_HARDCODED, SECRET_IN_HISTORY, INJECTION_SQL, INJECTION_CMD, INJECTION_PATH, AUTH_MISSING, INSECURE_RANDOM, DEPRECATED_CRYPTO, SSRF, CVE_DEPENDENCY, OTHER
 
 False positives: test/spec/mock paths, commented code, placeholders (xxx/changeme), os.environ references, node_modules.
 
-IMPORTANT: patch_unified_diff must use REAL newline characters (\\n), not the literal string \\n. The patch must apply cleanly with `git apply`.
+PATCH FORMAT - CRITICAL:
+patch_unified_diff must be a VALID UNIFIED DIFF like:
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -1,3 +1,4 @@
+ FROM node:18
++USER node
+ RUN npm ci
+
+The patch must:
+1. Start with "--- a/<file>" and "+++ b/<file>"
+2. Include proper hunk headers like "@@ -1,3 +1,4 @@"
+3. Use REAL newline characters in the JSON string (not literal \\n)
+4. Apply cleanly with: git apply patch.diff
+
+DO NOT use line numbers in the diff header that don't exist in the file.
+Keep patches minimal - only change what's needed to fix the issue.
 
 Sort by severity: CRITICAL > HIGH > MEDIUM > LOW. Return JSON array, empty if no true positives."""
 
